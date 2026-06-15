@@ -5,6 +5,7 @@ Data source: Yahoo Finance (free)
 Usage:
   python3 swing_analyzer.py AAPL          # single stock deep analysis
   python3 swing_analyzer.py QQQ --etf     # screen ETF holdings
+  python3 swing_analyzer.py --demo        # run demo with synthetic AAPL data
 """
 
 import yfinance as yf
@@ -12,7 +13,7 @@ import numpy as np
 import pandas as pd
 import sys
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 # ── Data Fetching ─────────────────────────────────────────────────────────────
@@ -365,14 +366,19 @@ def build_plan(price, daily, weekly, demand_zones, supply_zones, retrace, extens
     # 4. RSI + Stochastic
     rsi = daily.get("rsi") or 50
     stk = daily.get("stoch_k") or 50
-    if rsi < 35 or stk < 20:
+    oversold_parts = []
+    if rsi < 35:  oversold_parts.append(f"RSI {rsi}")
+    if stk < 20:  oversold_parts.append(f"StochRSI {stk}")
+    if oversold_parts:
         confluence += 1
-        factors.append(f"Oversold: RSI {rsi}, StochRSI {stk}")
+        factors.append(f"Oversold: {', '.join(oversold_parts)} — potential reversal")
     elif rsi < 55:
         confluence += 0.5
         factors.append(f"RSI neutral ({rsi}) — room to run")
-    elif rsi > 70 or stk > 80:
-        risks.append(f"Overbought: RSI {rsi}, StochRSI {stk} — risky to buy")
+    if rsi > 70 and stk > 80:
+        risks.append(f"Overbought: RSI {rsi}, StochRSI {stk} — risky to buy here")
+    elif rsi > 70:
+        risks.append(f"RSI overbought ({rsi}) — consider waiting for pullback")
 
     # 5. MACD
     macd = daily.get("macd", {})
@@ -771,6 +777,90 @@ def screen_etf(etf_ticker):
         analyze_ticker(choice)
 
 
+# ── Demo Mode ────────────────────────────────────────────────────────────────
+
+def _make_demo_hist(n=504, seed=42):
+    """Generate realistic AAPL-like daily OHLCV price series."""
+    rng = np.random.default_rng(seed)
+    dates = pd.bdate_range(end=datetime(2026, 6, 13), periods=n)
+
+    # Price path: base trend up with two corrections
+    t = np.linspace(0, 1, n)
+    trend = 155 + 80 * t                              # 155→235 over 2 years
+    correction = (
+        -18 * np.exp(-((t - 0.30) ** 2) / 0.004)     # dip ~60% into the period
+      + -22 * np.exp(-((t - 0.72) ** 2) / 0.003)     # dip ~80% into the period
+    )
+    noise  = rng.normal(0, 1.1, n).cumsum() * 0.18
+    close  = (trend + correction + noise).clip(min=120)
+
+    # Build OHLCV
+    daily_range = close * rng.uniform(0.005, 0.022, n)
+    high   = close + daily_range * rng.uniform(0.3, 1.0, n)
+    low    = close - daily_range * rng.uniform(0.3, 1.0, n)
+    open_  = close - daily_range * rng.uniform(-0.5, 0.5, n)
+    vol_base = 75_000_000
+    volume = (vol_base * rng.lognormal(0, 0.4, n)).astype(int).clip(min=5_000_000)
+
+    # Spike volume around the correction lows (capitulation bars)
+    for peak in [int(0.30 * n), int(0.72 * n)]:
+        for j in range(max(0, peak - 5), min(n, peak + 5)):
+            volume[j] = int(volume[j] * rng.uniform(2.0, 3.5))
+
+    hist = pd.DataFrame({
+        "Open":   open_,
+        "High":   high,
+        "Low":    low,
+        "Close":  close,
+        "Volume": volume,
+    }, index=dates)
+    return hist
+
+
+def _make_demo_hist_weekly(daily_hist):
+    """Resample daily demo data to weekly."""
+    return daily_hist.resample("W").agg({
+        "Open":   "first",
+        "High":   "max",
+        "Low":    "min",
+        "Close":  "last",
+        "Volume": "sum",
+    }).dropna()
+
+
+def run_demo():
+    ticker = "AAPL"
+    print(f"\n  [DEMO MODE] — synthetic AAPL-like data (no internet required)")
+
+    hist_d = _make_demo_hist(n=504)
+    hist_w = _make_demo_hist_weekly(hist_d)
+
+    price = float(hist_d["Close"].iloc[-1])
+
+    info = {
+        "shortName":   "Apple Inc.",
+        "sector":      "Technology",
+        "industry":    "Consumer Electronics",
+        "marketCap":   3_200_000_000_000,
+        "currentPrice": round(price, 2),
+    }
+
+    print(f"  Computing indicators …")
+    daily   = analyze_timeframe(hist_d)
+    weekly  = analyze_timeframe(hist_w)
+
+    demand_z = detect_demand_zones(hist_d, window=8)
+    supply_z = detect_supply_zones(hist_d, window=8)
+
+    s_high, s_low   = find_major_swing(hist_d, lookback=min(252, len(hist_d)))
+    retrace, extend = fibonacci_levels(s_high, s_low)
+
+    plan = build_plan(price, daily, weekly, demand_z, supply_z, retrace, extend)
+
+    print_report(ticker, info, price, daily, weekly, demand_z, supply_z,
+                 s_high, s_low, retrace, extend, plan)
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -778,8 +868,13 @@ def main():
         description="Swing Trading Analyzer — Multi-timeframe technical analysis"
     )
     parser.add_argument("ticker", nargs="?", help="Stock or ETF ticker (e.g. AAPL, QQQ)")
-    parser.add_argument("--etf", action="store_true", help="Screen ETF holdings for swing setups")
+    parser.add_argument("--etf",  action="store_true", help="Screen ETF holdings for swing setups")
+    parser.add_argument("--demo", action="store_true", help="Run demo with synthetic data (no internet needed)")
     args = parser.parse_args()
+
+    if args.demo:
+        run_demo()
+        return
 
     ticker = (args.ticker or input("  Enter ticker: ").strip()).upper()
 
