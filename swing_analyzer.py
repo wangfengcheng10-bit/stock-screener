@@ -779,69 +779,76 @@ def screen_etf(etf_ticker):
 
 # ── Demo Mode ────────────────────────────────────────────────────────────────
 
-def _make_demo_hist(n=504, seed=42):
-    """Generate realistic AAPL-like daily OHLCV price series."""
-    rng = np.random.default_rng(seed)
+# Realistic profiles for well-known tickers: (start, end, vol_base, mktcap, name, sector, industry)
+_DEMO_PROFILES = {
+    "AAPL":  (155, 235, 75_000_000, 3_200_000_000_000, "Apple Inc.",              "Technology",              "Consumer Electronics"),
+    "GOOGL": (120, 178, 22_000_000, 2_200_000_000_000, "Alphabet Inc.",           "Communication Services",  "Internet Content & Information"),
+    "GOOG":  (120, 178, 18_000_000, 2_200_000_000_000, "Alphabet Inc. (Class C)", "Communication Services",  "Internet Content & Information"),
+    "MSFT":  (290, 450, 20_000_000, 3_350_000_000_000, "Microsoft Corp.",         "Technology",              "Software—Infrastructure"),
+    "AMZN":  (155, 205, 35_000_000, 2_100_000_000_000, "Amazon.com Inc.",         "Consumer Cyclical",       "Internet Retail"),
+    "NVDA":  ( 42, 135, 45_000_000, 3_300_000_000_000, "NVIDIA Corp.",            "Technology",              "Semiconductors"),
+    "META":  (245, 580, 15_000_000, 1_460_000_000_000, "Meta Platforms Inc.",     "Communication Services",  "Internet Content & Information"),
+    "TSLA":  (175, 290, 90_000_000,   900_000_000_000, "Tesla Inc.",              "Consumer Cyclical",       "Auto Manufacturers"),
+    "NFLX":  (480, 1050, 3_500_000,   450_000_000_000, "Netflix Inc.",            "Communication Services",  "Entertainment"),
+    "AMD":   ( 95, 165, 55_000_000,   265_000_000_000, "Advanced Micro Devices",  "Technology",              "Semiconductors"),
+}
+_DEMO_DEFAULT = (100, 160, 20_000_000, 500_000_000_000, "Generic Corp.",          "Technology",              "N/A")
+
+
+def _make_demo_hist(start_price, end_price, vol_base, n=504, seed=42):
+    """Generate realistic daily OHLCV data between start and end price."""
+    rng   = np.random.default_rng(seed)
     dates = pd.bdate_range(end=datetime(2026, 6, 13), periods=n)
+    span  = end_price - start_price
 
-    # Price path: base trend up with two corrections
     t = np.linspace(0, 1, n)
-    trend = 155 + 80 * t                              # 155→235 over 2 years
+    trend = start_price + span * t
+    # Two pullback corrections along the way
     correction = (
-        -18 * np.exp(-((t - 0.30) ** 2) / 0.004)     # dip ~60% into the period
-      + -22 * np.exp(-((t - 0.72) ** 2) / 0.003)     # dip ~80% into the period
+        -span * 0.18 * np.exp(-((t - 0.30) ** 2) / 0.004)
+      + -span * 0.22 * np.exp(-((t - 0.72) ** 2) / 0.003)
     )
-    noise  = rng.normal(0, 1.1, n).cumsum() * 0.18
-    close  = (trend + correction + noise).clip(min=120)
+    noise  = rng.normal(0, 1.0, n).cumsum() * (span * 0.004)
+    close  = (trend + correction + noise).clip(min=start_price * 0.6)
 
-    # Build OHLCV
     daily_range = close * rng.uniform(0.005, 0.022, n)
     high   = close + daily_range * rng.uniform(0.3, 1.0, n)
     low    = close - daily_range * rng.uniform(0.3, 1.0, n)
     open_  = close - daily_range * rng.uniform(-0.5, 0.5, n)
-    vol_base = 75_000_000
-    volume = (vol_base * rng.lognormal(0, 0.4, n)).astype(int).clip(min=5_000_000)
+    volume = (vol_base * rng.lognormal(0, 0.4, n)).astype(int).clip(min=100_000)
 
-    # Spike volume around the correction lows (capitulation bars)
     for peak in [int(0.30 * n), int(0.72 * n)]:
         for j in range(max(0, peak - 5), min(n, peak + 5)):
             volume[j] = int(volume[j] * rng.uniform(2.0, 3.5))
 
-    hist = pd.DataFrame({
-        "Open":   open_,
-        "High":   high,
-        "Low":    low,
-        "Close":  close,
-        "Volume": volume,
-    }, index=dates)
-    return hist
+    return pd.DataFrame(
+        {"Open": open_, "High": high, "Low": low, "Close": close, "Volume": volume},
+        index=dates,
+    )
 
 
 def _make_demo_hist_weekly(daily_hist):
-    """Resample daily demo data to weekly."""
-    return daily_hist.resample("W").agg({
-        "Open":   "first",
-        "High":   "max",
-        "Low":    "min",
-        "Close":  "last",
-        "Volume": "sum",
-    }).dropna()
+    return daily_hist.resample("W").agg(
+        {"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"}
+    ).dropna()
 
 
-def run_demo():
-    ticker = "AAPL"
-    print(f"\n  [DEMO MODE] — synthetic AAPL-like data (no internet required)")
+def run_demo(ticker="AAPL"):
+    ticker = ticker.upper()
+    profile = _DEMO_PROFILES.get(ticker, _DEMO_DEFAULT)
+    start_p, end_p, vol_base, mktcap, name, sector, industry = profile
 
-    hist_d = _make_demo_hist(n=504)
+    print(f"\n  [DEMO MODE] — synthetic {ticker} data  (no internet required)")
+
+    hist_d = _make_demo_hist(start_p, end_p, vol_base, n=504)
     hist_w = _make_demo_hist_weekly(hist_d)
-
-    price = float(hist_d["Close"].iloc[-1])
+    price  = float(hist_d["Close"].iloc[-1])
 
     info = {
-        "shortName":   "Apple Inc.",
-        "sector":      "Technology",
-        "industry":    "Consumer Electronics",
-        "marketCap":   3_200_000_000_000,
+        "shortName":    name,
+        "sector":       sector,
+        "industry":     industry,
+        "marketCap":    mktcap,
         "currentPrice": round(price, 2),
     }
 
@@ -873,7 +880,8 @@ def main():
     args = parser.parse_args()
 
     if args.demo:
-        run_demo()
+        t = (args.ticker or "AAPL").upper()
+        run_demo(t)
         return
 
     ticker = (args.ticker or input("  Enter ticker: ").strip()).upper()
