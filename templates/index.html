@@ -221,6 +221,25 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
   border-radius: 50%; animation: spin .8s linear infinite;
   vertical-align: middle;
 }
+
+/* ── Indicator toggle toolbar ────────────────────────────────────────────── */
+#ind-toolbar {
+  height: 28px; min-height: 28px;
+  display: flex; align-items: center; gap: 4px; padding: 0 10px;
+  background: var(--bg2); border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.ind-toggle {
+  background: var(--bg3); color: var(--txt3);
+  border: 1px solid var(--border); border-radius: 3px;
+  padding: 2px 8px; font-size: 10px; font-weight: 700;
+  cursor: pointer; transition: all .15s; letter-spacing: .4px;
+}
+.ind-toggle:hover  { color: var(--txt); border-color: var(--txt2); }
+.ind-toggle.active { background: #1e3a5f; color: var(--cyan); border-color: var(--blue); }
+
+/* ── Change % in stock list ──────────────────────────────────────────────── */
+.si-change { font-size: 10px; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -256,6 +275,14 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
       <span id="ch-name" style="color:var(--txt3)"></span>
       <span id="ch-ohlcv"></span>
       <span id="ch-price"></span>
+      <span id="ch-change"></span>
+    </div>
+    <div id="ind-toolbar">
+      <button class="ind-toggle active" data-ind="ma50">MA50</button>
+      <button class="ind-toggle active" data-ind="sr">S/R</button>
+      <button class="ind-toggle active" data-ind="vp">VP</button>
+      <button class="ind-toggle active" data-ind="fibs">FIB</button>
+      <button class="ind-toggle active" data-ind="setup">SETUP</button>
     </div>
     <div id="chart-main"></div>
     <div id="rsi-divider">
@@ -296,6 +323,7 @@ let currentTf     = 'daily';
 let currentIdx    = null;
 let allStocks     = [];
 let histCache     = {};      // { ticker → { daily, weekly, daily_indicators, weekly_indicators } }
+const indicators  = { ma50: true, sr: true, vp: true, fibs: true, setup: true };
 
 // ── Chart initialisation ───────────────────────────────────────────────────
 function initCharts() {
@@ -425,39 +453,56 @@ function drawOverlays(ind, stockData) {
   const sr = ind.sr || {};
   const vp = ind.vp || {};
 
-  // Support zones (green dashed) — draw zone high as main line
-  (sr.supports || []).forEach((z, i) => {
-    if (!z) return;
-    const stars = '★'.repeat(Math.min(z.touches, 3));
-    add(z.high, '#26a69a99', LS.Dashed,  1, `S ${stars}`, i === 0);
-    add(z.low,  '#26a69a44', LS.Dotted,  1, '', false);
-  });
-
-  // Resistance zones (red dashed)
-  (sr.resistances || []).forEach((z, i) => {
-    if (!z) return;
-    const stars = '★'.repeat(Math.min(z.touches, 3));
-    add(z.low,  '#ef535099', LS.Dashed,  1, `R ${stars}`, i === 0);
-    add(z.high, '#ef535044', LS.Dotted,  1, '', false);
-  });
+  // Support / Resistance zones
+  if (indicators.sr) {
+    (sr.supports || []).forEach((z, i) => {
+      if (!z) return;
+      const stars = '★'.repeat(Math.min(z.touches, 3));
+      add(z.high, '#26a69a99', LS.Dashed, 1, `S ${stars}`, i === 0);
+      add(z.low,  '#26a69a44', LS.Dotted, 1, '', false);
+    });
+    (sr.resistances || []).forEach((z, i) => {
+      if (!z) return;
+      const stars = '★'.repeat(Math.min(z.touches, 3));
+      add(z.low,  '#ef535099', LS.Dashed, 1, `R ${stars}`, i === 0);
+      add(z.high, '#ef535044', LS.Dotted, 1, '', false);
+    });
+  }
 
   // Volume Profile: POC (white solid), VAH/VAL (cyan dotted)
-  if (vp.poc) {
+  if (indicators.vp && vp.poc) {
     add(vp.poc, '#ffffffcc', LS.Solid,  2, 'POC');
     add(vp.vah, '#64b5f6aa', LS.Dotted, 1, 'VAH');
     add(vp.val, '#64b5f6aa', LS.Dotted, 1, 'VAL');
   }
 
-  // Entry / Stop / Target from screener SR data
-  const ns = (stockData && stockData.sr) ? stockData.sr.nearest_support    : null;
-  const nr = (stockData && stockData.sr) ? stockData.sr.nearest_resistance  : null;
-
-  if (ns && ns.low) {
-    const stop = +(ns.low * 0.985).toFixed(2);
-    add(stop, '#ff9800', LS.Solid, 2, '⛔ Stop');
+  // Fibonacci retracement levels (52-week high → low)
+  if (indicators.fibs && ind.fibs) {
+    const fibColors = {
+      '0':    '#ef5350cc',
+      '23.6': '#ff9800cc',
+      '38.2': '#f5c842cc',
+      '50.0': '#9c27b0cc',
+      '61.8': '#26a69acc',
+      '78.6': '#64b5f6cc',
+      '100':  '#4caf50cc',
+    };
+    Object.entries(ind.fibs).forEach(([level, price]) => {
+      add(price, fibColors[level] || '#888888cc', LS.LargeDashed, 1, `${level}%`);
+    });
   }
-  if (nr && nr.price) {
-    add(nr.price, '#4caf50', LS.Dashed, 2, '🎯 Target');
+
+  // Entry / Stop / Target from screener SR data
+  if (indicators.setup) {
+    const ns = (stockData && stockData.sr) ? stockData.sr.nearest_support   : null;
+    const nr = (stockData && stockData.sr) ? stockData.sr.nearest_resistance : null;
+    if (ns && ns.low) {
+      const stop = +(ns.low * 0.985).toFixed(2);
+      add(stop, '#ff9800', LS.Solid, 2, '⛔ Stop');
+    }
+    if (nr && nr.price) {
+      add(nr.price, '#4caf50', LS.Dashed, 2, '🎯 Target');
+    }
   }
 }
 
@@ -471,7 +516,7 @@ function renderChart(ticker, stockData) {
   if (!candles || !ind) return;
 
   candleSeries.setData(candles);
-  ma50Line.setData(ind.ma50  || []);
+  ma50Line.setData(indicators.ma50 ? (ind.ma50 || []) : []);
   volSeries.setData(ind.volume || []);
   rsiLine.setData(ind.rsi   || []);
   drawOverlays(ind, stockData);
@@ -514,6 +559,16 @@ async function selectStock(idx) {
   document.getElementById('ch-name').textContent   = stock.name;
   document.getElementById('ch-price').textContent  = stock.price ? `$${stock.price.toFixed(2)}` : '';
   document.getElementById('ch-price').style.color  = '';
+  const chg = stock.change_pct;
+  const chgEl = document.getElementById('ch-change');
+  if (chg != null) {
+    chgEl.textContent = `${chg > 0 ? '+' : ''}${chg.toFixed(2)}%`;
+    chgEl.style.color = chg > 0 ? 'var(--green)' : chg < 0 ? 'var(--red)' : 'var(--txt2)';
+    chgEl.style.fontWeight = '600';
+    chgEl.style.fontSize = '12px';
+  } else {
+    chgEl.textContent = '';
+  }
 
   renderFundamentalPanel(stock);
   await loadHistory(stock.ticker, stock);
@@ -750,12 +805,16 @@ function renderRightPanel(sectorData, stocks) {
     const cls = setupColor(s.setup_label);
     const rc  = ratingColor(s.rating);
     const shortSetup = (s.setup_label || '').replace('— BOUNCE WATCH','').replace('— WAIT FOR PULLBACK','').trim();
+    const chg = s.change_pct;
+    const chgColor = chg == null ? '' : chg > 0 ? 'var(--green)' : chg < 0 ? 'var(--red)' : 'var(--txt2)';
+    const chgText  = chg == null ? '' : `${chg > 0 ? '+' : ''}${chg.toFixed(2)}%`;
     return `<div class="stock-item" data-idx="${i}" onclick="selectStock(${i})">
       <span class="si-rank">${i + 1}</span>
       <div class="si-body">
         <div class="si-top">
           <span class="si-ticker">${s.ticker}</span>
           <span class="si-price">${s.price ? '$' + s.price.toFixed(2) : ''}</span>
+          ${chgText ? `<span class="si-change" style="color:${chgColor}">${chgText}</span>` : ''}
         </div>
         <div class="si-bot">
           <span class="si-setup ${cls}">${shortSetup}</span>
@@ -832,6 +891,18 @@ function setStatus(msg) {
 document.getElementById('scan-btn').addEventListener('click', scanSector);
 document.getElementById('etf-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') scanSector();
+});
+
+document.querySelectorAll('.ind-toggle').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const key = btn.dataset.ind;
+    indicators[key] = !indicators[key];
+    btn.classList.toggle('active', indicators[key]);
+    if (currentIdx !== null && allStocks[currentIdx]) {
+      const s = allStocks[currentIdx];
+      if (histCache[s.ticker]) renderChart(s.ticker, s);
+    }
+  });
 });
 
 document.querySelectorAll('.tf-btn').forEach(btn => {

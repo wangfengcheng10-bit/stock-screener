@@ -108,6 +108,21 @@ def build_indicators(hist, price, weekly_hist=None):
     sr  = support_resistance_weekly(analysis, price)
     vp  = volume_profile(analysis)
 
+    # Fibonacci retracement from 52-week high → low
+    lookback = min(len(close), 252)
+    hi52 = float(close.iloc[-lookback:].max())
+    lo52 = float(close.iloc[-lookback:].min())
+    span = hi52 - lo52
+    fibs = {
+        "0":    round(hi52, 2),
+        "23.6": round(hi52 - 0.236 * span, 2),
+        "38.2": round(hi52 - 0.382 * span, 2),
+        "50.0": round(hi52 - 0.500 * span, 2),
+        "61.8": round(hi52 - 0.618 * span, 2),
+        "78.6": round(hi52 - 0.786 * span, 2),
+        "100":  round(lo52, 2),
+    } if span > 0 else {}
+
     def _zone(z):
         if z is None:
             return None
@@ -117,6 +132,7 @@ def build_indicators(hist, price, weekly_hist=None):
         "ma50":   ma50_data,
         "rsi":    rsi_data,
         "volume": vol_data,
+        "fibs":   fibs,
         "sr": {
             "supports":           [_zone(z) for z in sr.get("supports",    [])[:4]],
             "resistances":        [_zone(z) for z in sr.get("resistances", [])[:3]],
@@ -136,6 +152,10 @@ def _analyse_ticker(ticker):
     price = info.get("currentPrice") or info.get("regularMarketPrice")
     if not price:
         return None
+
+    prev_close = info.get("regularMarketPreviousClose") or info.get("previousClose")
+    change_pct = round((price - prev_close) / prev_close * 100, 2) \
+                 if prev_close and prev_close > 0 else None
 
     weekly_hist = get_weekly_history(ticker)
     if weekly_hist is None:
@@ -164,6 +184,7 @@ def _analyse_ticker(ticker):
         "ticker":       ticker,
         "name":         name,
         "price":        price,
+        "change_pct":   change_pct,
         "rating":       rating,
         "tech_score":   round(t_score, 1),
         "fund_score":   round(f_score, 1),
