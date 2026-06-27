@@ -10,6 +10,8 @@ import yfinance as yf
 import numpy as np
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
+import threading
 import sys
 import os
 
@@ -288,6 +290,113 @@ def get_history(ticker):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ── Watchlists (persisted to a local JSON file) ───────────────────────────────
+
+WATCHLIST_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                              "watchlists.json")
+_wl_lock = threading.Lock()
+
+
+def _load_watchlists():
+    """Return { name: [tickers] }. Missing/corrupt file → empty dict."""
+    try:
+        with open(WATCHLIST_FILE, "r") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return {k: list(v) for k, v in data.items() if isinstance(v, list)}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return {}
+
+
+def _save_watchlists(data):
+    with open(WATCHLIST_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+@app.route("/api/watchlists", methods=["GET"])
+def watchlists_get():
+    with _wl_lock:
+        return jsonify(_load_watchlists())
+
+
+@app.route("/api/watchlists", methods=["POST"])
+def watchlists_create():
+    body = request.get_json(force=True)
+    name = (body.get("name") or "").strip()
+    if not name:
+        return jsonify({"error": "Watchlist name required"}), 400
+    with _wl_lock:
+        data = _load_watchlists()
+        if name not in data:
+            data[name] = []
+            _save_watchlists(data)
+        return jsonify(data)
+
+
+@app.route("/api/watchlists/<name>", methods=["DELETE"])
+def watchlists_delete(name):
+    with _wl_lock:
+        data = _load_watchlists()
+        data.pop(name, None)
+        _save_watchlists(data)
+        return jsonify(data)
+
+
+@app.route("/api/watchlists/<name>/add", methods=["POST"])
+def watchlists_add_ticker(name):
+    body   = request.get_json(force=True)
+    ticker = (body.get("ticker") or "").strip().upper()
+    if not ticker:
+        return jsonify({"error": "Ticker required"}), 400
+    with _wl_lock:
+        data = _load_watchlists()
+        data.setdefault(name, [])
+        if ticker not in data[name]:
+            data[name].append(ticker)
+            _save_watchlists(data)
+        return jsonify(data)
+
+
+@app.route("/api/watchlists/<name>/remove", methods=["POST"])
+def watchlists_remove_ticker(name):
+    body   = request.get_json(force=True)
+    ticker = (body.get("ticker") or "").strip().upper()
+    with _wl_lock:
+        data = _load_watchlists()
+        if name in data and ticker in data[name]:
+            data[name].remove(ticker)
+            _save_watchlists(data)
+        return jsonify(data)
+
+
+@app.route("/api/watchlists/<name>/data", methods=["GET"])
+def watchlists_data(name):
+    """Fetch live analysis for every ticker in a watchlist (concurrently)."""
+    with _wl_lock:
+        tickers = list(_load_watchlists().get(name, []))
+    if not tickers:
+        return jsonify({"stocks": []})
+
+    results = []
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        futures = {pool.submit(_analyse_ticker, t): t for t in tickers}
+        for fut in as_completed(futures):
+            try:
+                r = fut.result()
+                if r is None:
+                    continue
+                r.pop("_breadth", None)
+                results.append(r)
+            except Exception:
+                continue
+
+    # Preserve the user's watchlist order
+    order = {t: i for i, t in enumerate(tickers)}
+    results.sort(key=lambda x: order.get(x["ticker"], 999))
+    return jsonify({"stocks": results})
 
 
 if __name__ == "__main__":
