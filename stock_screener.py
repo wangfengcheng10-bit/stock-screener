@@ -456,12 +456,114 @@ def print_detail(rank, c):
         print(f"      {entry.get('note','')}")
 
 
+# ── Fundamental Comparison ──────────────────────────────────────────────────────
+
+def compare_fundamentals(tickers):
+    """Side-by-side fundamental comparison of two or more tickers."""
+    rows = []
+    for ticker in tickers:
+        print(f"  Fetching {ticker} …", end="\r")
+        try:
+            info = yf.Ticker(ticker).info
+            score, d = fundamental_score(info)
+            rows.append({
+                "ticker": ticker,
+                "name":   info.get("shortName", ticker),
+                "price":  info.get("currentPrice") or info.get("regularMarketPrice"),
+                "score":  round(score, 2),
+                "d":      d,
+            })
+        except Exception:
+            print(f"  Could not fetch data for {ticker} — skipping.")
+
+    print(" " * 40)
+    if not rows:
+        print("No fundamental data could be fetched for the given tickers.")
+        sys.exit(1)
+
+    # Metrics to display: (label, key, suffix, "higher"/"lower" is better)
+    metrics = [
+        ("Revenue growth", "revenue_growth", "%",  "higher"),
+        ("Gross margin",   "gross_margin",   "%",  "higher"),
+        ("ROE",            "roe",            "%",  "higher"),
+        ("PEG",            "peg",            "",   "lower"),
+        ("Earnings growth","earnings_growth","%",  "higher"),
+    ]
+
+    name_w = 17
+    col_w  = max(12, max(len(r["ticker"]) for r in rows) + 2)
+    W      = name_w + col_w * len(rows) + 2
+
+    print(f"\n{'═'*W}")
+    print(f"  FUNDAMENTAL COMPARISON  ({datetime.now().strftime('%Y-%m-%d')})")
+    print(f"{'═'*W}")
+
+    # Header rows
+    header = f"  {'':<{name_w}}" + "".join(f"{r['ticker']:>{col_w}}" for r in rows)
+    print(f"\n{header}")
+    print(f"  {'':<{name_w}}" + "".join(f"{(r['name'][:col_w-2]):>{col_w}}" for r in rows))
+    print(f"  {'─'*(W-2)}")
+
+    price_line = f"  {'Price':<{name_w}}" + "".join(
+        f"{('$%.2f' % r['price']) if r['price'] else 'N/A':>{col_w}}" for r in rows)
+    print(price_line)
+    print(f"  {'─'*(W-2)}")
+
+    # One line per metric, marking the winner with ◄
+    for label, key, suffix, better in metrics:
+        vals = [r["d"].get(key) for r in rows]
+        present = [v for v in vals if v is not None]
+        best = None
+        if present:
+            best = max(present) if better == "higher" else min([v for v in present if v and v > 0] or present)
+        cells = []
+        for v in vals:
+            if v is None:
+                cells.append(f"{'—':>{col_w}}")
+            else:
+                txt = f"{v:.2f}{suffix}" if key == "peg" else f"{v:+.1f}{suffix}"
+                mark = " ◄" if (best is not None and v == best) else ""
+                cells.append(f"{txt + mark:>{col_w}}")
+        print(f"  {label:<{name_w}}" + "".join(cells))
+
+    print(f"  {'─'*(W-2)}")
+    score_line = f"  {'SCORE (0–5)':<{name_w}}" + "".join(
+        f"{('%.2f' % r['score']):>{col_w}}" for r in rows)
+    print(score_line)
+
+    # Verdict
+    top = max(rows, key=lambda r: r["score"])
+    ties = [r for r in rows if r["score"] == top["score"]]
+    print(f"\n{'═'*W}")
+    if len(ties) > 1:
+        names = ", ".join(r["ticker"] for r in ties)
+        print(f"  VERDICT: tie on fundamental score ({top['score']}/5) — {names}")
+    else:
+        print(f"  VERDICT: {top['ticker']} has the stronger fundamentals "
+              f"({top['score']}/5)")
+    print("  ◄ marks the best value for each metric (PEG: lower is better).")
+    print(f"{'═'*W}")
+    print("  Not financial advice. Always do your own research.")
+    print(f"{'═'*W}\n")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="ETF Stock Screener — Top 7 Ranked")
     parser.add_argument("etf", nargs="?", help="ETF ticker (e.g. QQQ, XLK, IBB)")
+    parser.add_argument("-c", "--compare", nargs="+", metavar="TICKER",
+                        help="Compare fundamentals of two or more stocks "
+                             "(e.g. --compare MU SNDK)")
     args = parser.parse_args()
+
+    if args.compare:
+        tickers = [t.upper() for t in args.compare]
+        if len(tickers) < 2:
+            print("  --compare needs at least two tickers (e.g. --compare MU SNDK).")
+            sys.exit(1)
+        compare_fundamentals(tickers)
+        return
 
     etf_ticker = (args.etf or input("Enter ETF ticker: ").strip()).upper()
 

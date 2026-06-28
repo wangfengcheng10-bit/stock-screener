@@ -5,9 +5,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Running the screener
 
 ```bash
-python3 stock_screener.py QQQ        # pass ETF ticker directly
-python3 stock_screener.py            # interactive prompt
+python3 stock_screener.py QQQ                 # pass ETF ticker directly
+python3 stock_screener.py                     # interactive prompt
+python3 stock_screener.py --compare MU SNDK   # side-by-side fundamental comparison of 2+ stocks
 ```
+
+`--compare` (`-c`) skips ETF/holdings logic and runs `compare_fundamentals()`, which scores each ticker with `fundamental_score()` and prints a side-by-side table (best value per metric marked with ◄) plus a verdict.
 
 Dependencies: `yfinance`, `numpy`, `pandas` (all installed globally via pip3).
 
