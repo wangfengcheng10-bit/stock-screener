@@ -1,0 +1,6 @@
+# Generated watchlists (one set per run)
+watchlists/
+
+# Python
+__pycache__/
+*.pyc
