@@ -58,6 +58,55 @@ def get_history(ticker: str) -> pd.DataFrame:
     return df
 
 
+def load_csv(path: str) -> pd.DataFrame:
+    """Load daily OHLC history from a local CSV.
+
+    Column names are matched case-insensitively. A `Date` column becomes the
+    index. Raw (unadjusted) Open/High/Low/Close are used deliberately: gap
+    detection is about the prices actually printed on the chart, so split /
+    dividend adjustment would invent or erase gaps on ex-dates.
+    """
+    raw = pd.read_csv(path)
+    cols = {c.lower().strip(): c for c in raw.columns}
+
+    def pick(*names):
+        for n in names:
+            if n in cols:
+                return cols[n]
+        raise SystemExit(
+            f"CSV {path!r} is missing a required column (one of {names}). "
+            f"Found: {list(raw.columns)}"
+        )
+
+    date_c = pick("date", "datetime", "timestamp")
+    o, h, l, c = (pick("open"), pick("high"), pick("low"), pick("close"))
+    keep = [date_c, o, h, l, c]
+    rename = {date_c: "Date", o: "Open", h: "High", l: "Low", c: "Close"}
+    split_c = cols.get("split")
+    if split_c:
+        keep.append(split_c)
+        rename[split_c] = "Split"
+    df = raw[keep].copy().rename(columns=rename)
+    df["Date"] = pd.to_datetime(df["Date"])
+    df = df.dropna(subset=["Open", "High", "Low", "Close"])
+    df = df.sort_values("Date").set_index("Date")
+    if df.empty:
+        raise SystemExit(f"No usable OHLC rows in {path!r}.")
+
+    # Back-adjust OHLC for stock splits so a split ex-date is not mistaken for
+    # a price gap. Dividends are intentionally NOT adjusted out: an ex-dividend
+    # gap is a real overnight move on the chart. The split factor for a bar is
+    # the product of every split ratio that takes effect *after* that bar.
+    if "Split" in df.columns and (df["Split"] != 1.0).any():
+        rev_cum = df["Split"][::-1].cumprod().shift(1).fillna(1.0)[::-1]
+        for col in ("Open", "High", "Low", "Close"):
+            df[col] = df[col] / rev_cum
+        df = df.drop(columns=["Split"])
+    elif "Split" in df.columns:
+        df = df.drop(columns=["Split"])
+    return df
+
+
 def find_gaps(df: pd.DataFrame, min_gap_pct: float = 0.0) -> pd.DataFrame:
     """Return one row per true gap between consecutive trading days.
 
@@ -158,7 +207,7 @@ def summarize(gaps: pd.DataFrame, df: pd.DataFrame, ticker: str) -> str:
     down = gaps[gaps["direction"] == "down"]
 
     lines.append("=" * 60)
-    lines.append(f"  NASDAQ 100 ({ticker}) DAILY GAP ANALYSIS")
+    lines.append(f"  DAILY GAP ANALYSIS  —  {ticker}")
     lines.append("=" * 60)
     lines.append(f"  History window : {start}  ->  {end}")
     lines.append(f"  Trading days   : {n_days:,}")
@@ -228,16 +277,28 @@ def main(argv=None):
                     help="Yahoo Finance symbol (default: ^NDX = NASDAQ 100)")
     ap.add_argument("--min-gap-pct", type=float, default=0.0,
                     help="Ignore gaps smaller than this %% of prior close")
+    ap.add_argument("--csv-input", default=None,
+                    help="Analyse a local daily-OHLC CSV instead of Yahoo "
+                         "(needs Date/Open/High/Low/Close columns)")
+    ap.add_argument("--label", default=None,
+                    help="Display name for the series (default: ticker or file)")
     ap.add_argument("--csv", default=None,
                     help="Optional path to write the full per-gap table as CSV")
     args = ap.parse_args(argv)
 
-    print(f"Downloading maximum daily history for {args.ticker} ...",
-          file=sys.stderr)
-    df = get_history(args.ticker)
+    if args.csv_input:
+        print(f"Loading daily history from {args.csv_input} ...",
+              file=sys.stderr)
+        df = load_csv(args.csv_input)
+        label = args.label or args.csv_input
+    else:
+        print(f"Downloading maximum daily history for {args.ticker} ...",
+              file=sys.stderr)
+        df = get_history(args.ticker)
+        label = args.label or args.ticker
     gaps = find_gaps(df, min_gap_pct=args.min_gap_pct)
 
-    print(summarize(gaps, df, args.ticker))
+    print(summarize(gaps, df, label))
 
     if args.csv:
         gaps.to_csv(args.csv, index=False)
