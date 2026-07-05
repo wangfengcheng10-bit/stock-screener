@@ -282,6 +282,10 @@ def main(argv=None):
                          "(needs Date/Open/High/Low/Close columns)")
     ap.add_argument("--label", default=None,
                     help="Display name for the series (default: ticker or file)")
+    ap.add_argument("--start", default=None,
+                    help="Ignore data before this date (YYYY-MM-DD)")
+    ap.add_argument("--end", default=None,
+                    help="Ignore data after this date (YYYY-MM-DD)")
     ap.add_argument("--csv", default=None,
                     help="Optional path to write the full per-gap table as CSV")
     args = ap.parse_args(argv)
@@ -296,6 +300,14 @@ def main(argv=None):
               file=sys.stderr)
         df = get_history(args.ticker)
         label = args.label or args.ticker
+
+    if args.start:
+        df = df[df.index >= pd.to_datetime(args.start)]
+    if args.end:
+        df = df[df.index <= pd.to_datetime(args.end)]
+    if df.empty:
+        raise SystemExit("No data left after applying --start/--end filters.")
+
     gaps = find_gaps(df, min_gap_pct=args.min_gap_pct)
 
     print(summarize(gaps, df, label))
