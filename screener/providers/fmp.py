@@ -156,6 +156,7 @@ class FMPFundamentalsProvider(_FMPClientMixin, FundamentalsProvider):
                 as_of=date.today(),
             )
             for row in estimates.json()
+            if row.get("date")
         ]
         earnings_surprises = [
             EarningsSurprise(
@@ -172,6 +173,7 @@ class FMPFundamentalsProvider(_FMPClientMixin, FundamentalsProvider):
                 ),
             )
             for row in surprises.json()
+            if row.get("date")
         ]
 
         revenue_ttm = sum(p.revenue or 0 for p in income_quarterly[:4]) if len(income_quarterly) >= 4 else None

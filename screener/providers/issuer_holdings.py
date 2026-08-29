@@ -23,7 +23,9 @@ class IssuerEndpoint:
 def _parse_ishares_csv(content: bytes) -> pd.DataFrame:
     text = content.decode("utf-8", errors="ignore")
     lines = text.splitlines()
-    header_idx = next(i for i, line in enumerate(lines) if line.startswith("Ticker"))
+    header_idx = next((i for i, line in enumerate(lines) if line.startswith("Ticker")), None)
+    if header_idx is None:
+        raise ValueError("iShares CSV format has changed: no line starting with 'Ticker' found — registry needs a refresh")
     df = pd.read_csv(io.StringIO("\n".join(lines[header_idx:])))
     return df.rename(
         columns={"Ticker": "ticker", "Name": "name", "Weight (%)": "weight_pct", "Sector": "sector", "Asset Class": "asset_class"}
