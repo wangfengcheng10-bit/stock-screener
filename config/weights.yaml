@@ -1,0 +1,13 @@
+pillar_weights:
+  growth: 0.20
+  profitability: 0.25
+  balance_sheet: 0.20
+  cash_flow: 0.20
+  outlook: 0.15
+
+winsorize_lower_pct: 0.05
+winsorize_upper_pct: 0.95
+min_data_coverage_pct: 60.0
+prerevenue_floor_usd: 1000000
+cache_ttl_hours: 24
+max_concurrent_requests: 8
