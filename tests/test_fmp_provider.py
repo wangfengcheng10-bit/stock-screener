@@ -23,8 +23,10 @@ class _FakeClient:
 
     def __init__(self, routes: dict[str, object]):
         self._routes = routes
+        self.calls: list[tuple[str, dict]] = []
 
     async def get(self, url: str, params=None):
+        self.calls.append((url, params or {}))
         for key, payload in self._routes.items():
             if key in url:
                 return _FakeResponse(payload)
@@ -70,6 +72,11 @@ async def test_fundamentals_provider_builds_snapshot():
     assert snapshot.income_quarterly[0].revenue == 1000
     assert snapshot.income_quarterly[0].period.fiscal_quarter == 2
     assert snapshot.earnings_surprises[0].surprise_pct == pytest.approx((1.6 - 1.5) / 1.5 * 100)
+
+    # quarterly and annual cash flow must be two distinct requests, not one reused payload
+    cashflow_periods = sorted(p.get("period") for url, p in client.calls if "cash-flow-statement" in url)
+    assert cashflow_periods == ["annual", "quarter"]
+    assert snapshot.cash_flow_annual[0].operating_cash_flow == 300
 
 
 async def test_fundamentals_provider_skips_rows_missing_date_instead_of_crashing():

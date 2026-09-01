@@ -60,6 +60,22 @@ def balance(total_debt, cash, equity, assets, current_assets, current_liabilitie
     ]
 
 
+def annual_cash_flow(ocf_list, capex_list, start_year=2026):
+    periods = []
+    for i, (ocf, capex) in enumerate(zip(ocf_list, capex_list)):
+        year = start_year - i
+        fcf = (ocf + capex) if ocf is not None and capex is not None else None
+        periods.append(
+            CashFlowPeriod(
+                period=FiscalPeriod(fiscal_year=year, period_end=date(year, 12, 31)),
+                operating_cash_flow=ocf,
+                capex=capex,
+                free_cash_flow=fcf,
+            )
+        )
+    return periods
+
+
 def cash_flow(ocf_list, capex_list, start=date(2026, 6, 30)):
     periods = []
     for i, (ocf, capex) in enumerate(zip(ocf_list, capex_list)):

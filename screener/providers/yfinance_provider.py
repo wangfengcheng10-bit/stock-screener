@@ -40,7 +40,7 @@ class YFinanceFundamentalsProvider(FundamentalsProvider):
             t = yf.Ticker(ticker)
             info = t.info
             q_fin, a_fin = t.quarterly_financials, t.financials
-            q_bs, q_cf = t.quarterly_balance_sheet, t.quarterly_cashflow
+            q_bs, q_cf, a_cf = t.quarterly_balance_sheet, t.quarterly_cashflow, t.cashflow
         except Exception as exc:
             return FundamentalSnapshot(ticker=ticker, fetch_failed=True, fetch_error=str(exc))
 
@@ -109,6 +109,7 @@ class YFinanceFundamentalsProvider(FundamentalsProvider):
         income_annual = _build_income(a_fin) if a_fin is not None and not a_fin.empty else []
         balance_sheet = _build_balance(q_bs) if q_bs is not None and not q_bs.empty else []
         cash_flow = _build_cashflow(q_cf) if q_cf is not None and not q_cf.empty else []
+        cash_flow_annual = _build_cashflow(a_cf) if a_cf is not None and not a_cf.empty else []
 
         revenue_ttm = sum(p.revenue or 0 for p in income_quarterly[:4]) if len(income_quarterly) >= 4 else None
 
@@ -135,6 +136,7 @@ class YFinanceFundamentalsProvider(FundamentalsProvider):
             income_annual=income_annual,
             balance_sheet=balance_sheet,
             cash_flow=cash_flow,
+            cash_flow_annual=cash_flow_annual,
             analyst_estimates=analyst_estimates,
             estimate_revisions=[],
             earnings_surprises=[],

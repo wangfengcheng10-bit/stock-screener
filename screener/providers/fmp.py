@@ -89,6 +89,7 @@ class FMPFundamentalsProvider(_FMPClientMixin, FundamentalsProvider):
             income_a = await self._get(f"{BASE_URL}/income-statement/{ticker}", params={"period": "annual", "limit": 5})
             balance = await self._get(f"{BASE_URL}/balance-sheet-statement/{ticker}", params={"period": "quarter", "limit": 8})
             cashflow = await self._get(f"{BASE_URL}/cash-flow-statement/{ticker}", params={"period": "quarter", "limit": 8})
+            cashflow_a = await self._get(f"{BASE_URL}/cash-flow-statement/{ticker}", params={"period": "annual", "limit": 5})
             estimates = await self._get(f"{BASE_URL}/analyst-estimates/{ticker}", params={"period": "annual", "limit": 2})
             surprises = await self._get(f"{BASE_URL}/earnings-surprises/{ticker}", params={"limit": 4})
             profile = await self._get(f"{BASE_URL}/profile/{ticker}")
@@ -148,6 +149,15 @@ class FMPFundamentalsProvider(_FMPClientMixin, FundamentalsProvider):
             )
             for row in cashflow.json()
         ]
+        cash_flow_annual = [
+            CashFlowPeriod(
+                period=_period(row),
+                operating_cash_flow=row.get("operatingCashFlow"),
+                capex=row.get("capitalExpenditure"),
+                free_cash_flow=row.get("freeCashFlow"),
+            )
+            for row in cashflow_a.json()
+        ]
         analyst_estimates = [
             AnalystEstimate(
                 fiscal_year=datetime.strptime(row["date"], "%Y-%m-%d").year,
@@ -189,6 +199,7 @@ class FMPFundamentalsProvider(_FMPClientMixin, FundamentalsProvider):
             income_annual=income_annual,
             balance_sheet=balance_sheet,
             cash_flow=cash_flow,
+            cash_flow_annual=cash_flow_annual,
             analyst_estimates=analyst_estimates,
             estimate_revisions=[],  # FMP v3 has no direct revision-history endpoint; wire in when a source is picked
             earnings_surprises=earnings_surprises,

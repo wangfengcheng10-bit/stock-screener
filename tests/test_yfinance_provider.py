@@ -24,6 +24,11 @@ class _FakeTicker:
         self.financials = pd.DataFrame()
         self.quarterly_balance_sheet = pd.DataFrame()
         self.quarterly_cashflow = pd.DataFrame()
+        annual_cols = [pd.Timestamp("2025-12-31"), pd.Timestamp("2024-12-31")]
+        self.cashflow = pd.DataFrame(
+            {annual_cols[0]: [300.0, -50.0], annual_cols[1]: [250.0, -40.0]},
+            index=["Operating Cash Flow", "Capital Expenditure"],
+        )
 
 
 async def test_yfinance_snapshot_builds_from_quarterly_financials(monkeypatch):
@@ -35,6 +40,10 @@ async def test_yfinance_snapshot_builds_from_quarterly_financials(monkeypatch):
     assert snapshot.income_quarterly[0].net_income == 200.0
     # TTM revenue (sum of the 4 fake quarters) triggers the forward-estimate derivation
     assert snapshot.analyst_estimates[0].consensus_eps == 5.0
+    # annual cash flow is populated separately from the quarterly series
+    assert len(snapshot.cash_flow_annual) == 2
+    assert snapshot.cash_flow_annual[0].operating_cash_flow == 300.0
+    assert snapshot.cash_flow_annual[0].free_cash_flow == 250.0  # ocf + negative capex
 
 
 async def test_yfinance_snapshot_marks_fetch_failed_on_empty_financials(monkeypatch):
@@ -44,6 +53,7 @@ async def test_yfinance_snapshot_marks_fetch_failed_on_empty_financials(monkeypa
         financials = pd.DataFrame()
         quarterly_balance_sheet = pd.DataFrame()
         quarterly_cashflow = pd.DataFrame()
+        cashflow = pd.DataFrame()
 
     monkeypatch.setattr(yfp.yf, "Ticker", lambda ticker: _EmptyTicker())
     snapshot = await yfp.YFinanceFundamentalsProvider().get_snapshot("BADCO")

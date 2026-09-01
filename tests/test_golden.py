@@ -6,7 +6,7 @@ output, including the data-quality gate sorting a low-coverage name last
 regardless of its raw composite score.
 """
 
-from conftest import annual_income, balance, cash_flow, quarterly_income
+from conftest import annual_cash_flow, annual_income, balance, cash_flow, quarterly_income
 
 from screener.models import FundamentalSnapshot, Holding
 from screener.pipeline.scoring import build_universe_data, score_universe
@@ -22,14 +22,16 @@ def _make_universe():
         income_annual=annual_income([500, 450, 400, 350, 300], [100, 85, 70, 55, 40], diluted_shares=[1000] * 5),
         balance_sheet=balance(total_debt=200, cash=500, equity=2000, assets=3000, current_assets=800, current_liabilities=300),
         cash_flow=cash_flow([40, 38, 36, 34], [-5, -5, -5, -5]),
+        cash_flow_annual=annual_cash_flow([160, 140, 125, 110, 100], [-20, -18, -16, -15, -14]),
     )
     weak = FundamentalSnapshot(
         ticker="WEAK",
         sector="Technology",
         income_quarterly=quarterly_income([102, 101, 100, 100, 100, 100, 100, 100], [2, 2, 2, 2, 3, 3, 3, 3]),
         income_annual=annual_income([405, 400, 395, 390, 385], [8, 9, 10, 11, 12], diluted_shares=[1050, 1030, 1010, 1000, 990]),
-        balance_sheet=balance(total_debt=1800, cash=50, equity=500, assets=2500, current_assets=300, current_liabilities=350),
+        balance_sheet=balance(total_debt=1800, cash=50, equity=500, assets=2500, current_assets=350, current_liabilities=350),
         cash_flow=cash_flow([5, 4, 3, 2], [-8, -8, -8, -8]),
+        cash_flow_annual=annual_cash_flow([14, 20, 26, 30, 34], [-32, -30, -28, -26, -24]),
     )
     sparse = FundamentalSnapshot(ticker="SPARSE", sector="Technology", market_cap=1_000_000)
 
@@ -57,6 +59,15 @@ def test_golden_ranking_favors_stronger_fundamentals():
     assert scorecards["GOOD"].composite_score > scorecards["WEAK"].composite_score
     assert scorecards["GOOD"].low_confidence is False
     assert scorecards["WEAK"].low_confidence is False
+
+
+def test_golden_annual_cashflow_metrics_are_populated():
+    holdings, snapshots = _make_universe()
+    universe = build_universe_data(snapshots)
+    assert universe.raw_df.loc["GOOD", "fcf_consistency"] == 5  # all 5 years FCF-positive
+    assert universe.raw_df.loc["WEAK", "fcf_consistency"] == 2
+    assert universe.raw_df.loc["GOOD", "ocf_cagr_3y"] > 0  # OCF growing
+    assert universe.raw_df.loc["WEAK", "ocf_cagr_3y"] < 0  # OCF shrinking
 
 
 def test_golden_low_confidence_sorts_last_regardless_of_score():

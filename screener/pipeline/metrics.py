@@ -211,13 +211,15 @@ def fcf_conversion(s: FundamentalSnapshot) -> Optional[float]:
 
 
 def ocf_cagr_3y(s: FundamentalSnapshot) -> Optional[float]:
-    # Needs 3 years of *annual* operating cash flow. This pipeline's fetch
-    # stage only pulls quarterly cash-flow statements (providers/fmp.py,
-    # providers/yfinance_provider.py both populate FundamentalSnapshot.cash_flow
-    # with quarterly data only), so this is structurally unavailable until an
-    # annual cash-flow fetch is added -- correctly reported as missing/neutral
-    # rather than computed from the wrong period length.
-    return None
+    a = _sorted_desc(s.cash_flow_annual)
+    if len(a) < 4:
+        return None
+    ocf_t, ocf_t3 = a[0].operating_cash_flow, a[3].operating_cash_flow
+    # A CAGR off a zero or negative base is not a growth rate -- report it
+    # missing rather than emit a number that ranks as if it were one.
+    if ocf_t is None or not ocf_t3 or ocf_t3 <= 0 or ocf_t <= 0:
+        return None
+    return (ocf_t / ocf_t3) ** (1 / 3) - 1
 
 
 def capex_intensity(s: FundamentalSnapshot) -> Optional[float]:
@@ -229,8 +231,17 @@ def capex_intensity(s: FundamentalSnapshot) -> Optional[float]:
 
 
 def fcf_consistency(s: FundamentalSnapshot) -> Optional[float]:
-    # Needs 5 years of annual FCF -- same annual cash-flow gap as ocf_cagr_3y.
-    return None
+    """Count of positive-FCF years in the last 5."""
+    annual = _sorted_desc(s.cash_flow_annual)[:5]
+    fcf_values = []
+    for period in annual:
+        if period.free_cash_flow is not None:
+            fcf_values.append(period.free_cash_flow)
+        elif period.operating_cash_flow is not None and period.capex is not None:
+            fcf_values.append(period.operating_cash_flow + period.capex)
+    if not fcf_values:
+        return None
+    return float(sum(1 for v in fcf_values if v > 0))
 
 
 # ---------------------------------------------------------------------------

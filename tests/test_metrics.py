@@ -2,7 +2,7 @@ import statistics
 from datetime import date
 
 import pytest
-from conftest import annual_income, balance, cash_flow, quarterly_income
+from conftest import annual_cash_flow, annual_income, balance, cash_flow, quarterly_income
 
 from screener.models import EarningsSurprise, FiscalPeriod, FundamentalSnapshot
 from screener.pipeline import metrics as m
@@ -74,7 +74,26 @@ def test_earnings_surprise_history_averages_available_surprises():
     assert m.earnings_surprise_history(snap) == pytest.approx(4.0)
 
 
-def test_metrics_needing_annual_cashflow_are_reported_missing_not_wrong():
+def test_ocf_cagr_3y():
+    snap = FundamentalSnapshot(ticker="T", cash_flow_annual=annual_cash_flow([133.1, 121, 110, 100, 90], [-10] * 5))
+    assert m.ocf_cagr_3y(snap) == pytest.approx(0.10, rel=1e-3)
+
+
+def test_ocf_cagr_3y_missing_when_base_year_not_positive():
+    snap = FundamentalSnapshot(ticker="T", cash_flow_annual=annual_cash_flow([133.1, 121, 110, -50, 90], [-10] * 5))
+    assert m.ocf_cagr_3y(snap) is None
+
+
+def test_fcf_consistency_counts_positive_years():
+    # FCF per year = ocf + capex: 90, 40, -5, -20, 10 -> 3 positive years
+    snap = FundamentalSnapshot(
+        ticker="T",
+        cash_flow_annual=annual_cash_flow([100, 50, 5, 0, 20], [-10, -10, -10, -20, -10]),
+    )
+    assert m.fcf_consistency(snap) == pytest.approx(3.0)
+
+
+def test_annual_cashflow_metrics_missing_when_no_annual_data():
     snap = FundamentalSnapshot(ticker="T")
     assert m.ocf_cagr_3y(snap) is None
     assert m.fcf_consistency(snap) is None

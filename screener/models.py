@@ -94,7 +94,8 @@ class FundamentalSnapshot(BaseModel):
     income_quarterly: list[IncomeStatementPeriod] = Field(default_factory=list)  # up to 8 quarters
     income_annual: list[IncomeStatementPeriod] = Field(default_factory=list)  # up to 5 years
     balance_sheet: list[BalanceSheetPeriod] = Field(default_factory=list)
-    cash_flow: list[CashFlowPeriod] = Field(default_factory=list)
+    cash_flow: list[CashFlowPeriod] = Field(default_factory=list)  # up to 8 quarters
+    cash_flow_annual: list[CashFlowPeriod] = Field(default_factory=list)  # up to 5 years
     analyst_estimates: list[AnalystEstimate] = Field(default_factory=list)
     estimate_revisions: list[EstimateRevision] = Field(default_factory=list)
     earnings_surprises: list[EarningsSurprise] = Field(default_factory=list)
